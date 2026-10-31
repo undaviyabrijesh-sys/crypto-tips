@@ -1,0 +1,51 @@
+name: Kronos backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of history to test"
+        default: "7"
+      step_hours:
+        description: "Hours between forecast points"
+        default: "2"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Fetch Kronos code
+        run: git clone --depth 1 https://github.com/shiyu-coder/Kronos vendor/Kronos
+
+      - name: Install dependencies (CPU torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kronos-base-v1
+
+      - name: Run backtest
+        run: python backtest.py --days ${{ inputs.days }} --step-hours ${{ inputs.step_hours }} --max-minutes 300
+
+      - name: Show summary
+        if: always()
+        run: cat results/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: results/
