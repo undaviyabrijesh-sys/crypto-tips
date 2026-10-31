@@ -1,0 +1,15 @@
+symbols:
+  - name: BTCUSD
+    delta: ["BTCUSD"]
+  - name: ETHUSD
+    delta: ["ETHUSD"]
+  - name: GOLD
+    delta: ["XAUTUSD", "PAXGUSD"]
+
+costs:
+  fee_pct_per_side: 0.05
+  slippage_pct_per_side: 0.02
+
+grid:
+  min_move_atr: [0.5, 1.0, 1.5]
+  min_agreement: [0.625, 0.75, 0.875]
