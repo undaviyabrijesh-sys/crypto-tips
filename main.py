@@ -48,7 +48,7 @@ def main() -> None:
                 continue
             paths = fc.sample_paths(hist, mins, f_cfg["horizon_bars"], f_cfg["n_paths"],
                                     f_cfg["temperature"], f_cfg["top_p"])
-            signal, summary = evaluate(name, hist, paths, sym["min_move_pct"],
+            signal, summary = evaluate(name, hist, paths, sig_cfg["min_move_atr"],
                                        sig_cfg["min_agreement"], sig_cfg["min_rr"],
                                        f_cfg["horizon_bars"])
             print(f"[{used}] {summary}")
