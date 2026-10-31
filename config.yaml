@@ -15,18 +15,18 @@ forecast:
   top_p: 0.9
 
 signal:
-  min_agreement: 0.5                    # share of paths that must agree on direction
-  min_rr: 0.5                            # minimum reward:risk of suggested TP/SL
+  min_agreement: 0.75                   # share of paths that must agree on direction
+  min_rr: 2.0                            # minimum reward:risk of suggested TP/SL
   cooldown_hours: 4                      # no repeat alert for same symbol+direction
 
 # min_move_pct = minimum average forecast move over the horizon (in %)
 symbols:
   - name: BTCUSD
     tickers: ["BTC-USD"]
-    min_move_pct: 0.01
+    min_move_pct: 0.5
   - name: ETHUSD
     tickers: ["ETH-USD"]
-    min_move_pct: 0.01
+    min_move_pct: 0.7
   - name: XAUUSD
     tickers: ["XAUUSD=X", "GC=F"]        # tried in order; GC=F is gold futures fallback
-    min_move_pct: 0.01
+    min_move_pct: 0.2
