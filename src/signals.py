@@ -24,7 +24,7 @@ def atr(df: pd.DataFrame, n: int = 14) -> float:
     return float(tr.rolling(n).mean().iloc[-1])
 
 
-def evaluate(symbol, hist, paths, min_move_pct, min_agreement, min_rr, horizon_bars):
+def evaluate(symbol, hist, paths, min_move_atr, min_agreement, min_rr, horizon_bars):
     entry = float(hist["close"].iloc[-1])
     finals = np.array([float(p["close"].iloc[-1]) for p in paths])
     rets = finals / entry - 1.0
@@ -34,15 +34,18 @@ def evaluate(symbol, hist, paths, min_move_pct, min_agreement, min_rr, horizon_b
     agreement = p_up if long else 1 - p_up
     direction = "LONG" if long else "SHORT"
 
-    summary = f"{symbol}: exp {mean_move:+.2f}% | {direction} agreement {agreement:.0%}"
-    if abs(mean_move) < min_move_pct:
-        return None, summary + f" | move < {min_move_pct}%"
+    atr_val = atr(hist)
+    required = min_move_atr * atr_val / entry * 100
+    summary = (f"{symbol}: exp {mean_move:+.2f}% (need {required:.2f}%) | "
+               f"{direction} agreement {agreement:.0%}")
+    if abs(mean_move) < required:
+        return None, summary + " | move too small"
     if agreement < min_agreement:
         return None, summary + f" | agreement < {min_agreement:.0%}"
 
     highs = np.array([float(p["high"].max()) for p in paths])
     lows = np.array([float(p["low"].min()) for p in paths])
-    floor = 0.5 * atr(hist)
+    floor = 0.5 * atr_val
     if long:
         tp = float(np.median(highs))
         sl = min(float(np.percentile(lows, 20)), entry - floor)
