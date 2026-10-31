@@ -22,7 +22,7 @@ jobs:
           cache: pip
 
       - name: Fetch Kronos code
-        run: bash scripts/setup.sh
+        run: git clone --depth 1 https://github.com/shiyu-coder/Kronos vendor/Kronos
 
       - name: Install dependencies (CPU torch)
         run: |
