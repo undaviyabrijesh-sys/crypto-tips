@@ -1,0 +1,32 @@
+model:
+  name: NeoQuasar/Kronos-base            # 102M params, context 512
+  tokenizer: NeoQuasar/Kronos-Tokenizer-base
+  max_context: 512
+  device: null                           # null = auto (cuda if available, else cpu)
+
+data:
+  interval: 15m                          # yfinance interval: 5m, 15m, 30m, 60m
+  lookback: 400                          # candles fed to the model (<= 512)
+
+forecast:
+  horizon_bars: 16                       # 16 x 15m = next 4 hours
+  n_paths: 8                             # independent sampled futures per symbol
+  temperature: 1.0
+  top_p: 0.9
+
+signal:
+  min_agreement: 0.75                    # share of paths that must agree on direction
+  min_rr: 1.5                            # minimum reward:risk of suggested TP/SL
+  cooldown_hours: 4                      # no repeat alert for same symbol+direction
+
+# min_move_pct = minimum average forecast move over the horizon (in %)
+symbols:
+  - name: BTCUSD
+    tickers: ["BTC-USD"]
+    min_move_pct: 0.5
+  - name: ETHUSD
+    tickers: ["ETH-USD"]
+    min_move_pct: 0.7
+  - name: XAUUSD
+    tickers: ["XAUUSD=X", "GC=F"]        # tried in order; GC=F is gold futures fallback
+    min_move_pct: 0.2

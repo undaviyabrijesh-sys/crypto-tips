@@ -1,0 +1,12 @@
+# torch is installed separately (CPU wheel in CI) - see README
+numpy
+pandas
+pyyaml
+requests
+yfinance
+einops
+huggingface_hub
+safetensors
+tqdm
+matplotlib
+python-dotenv
