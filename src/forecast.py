@@ -21,6 +21,7 @@ class Forecaster:
 
     def sample_paths(self, df: pd.DataFrame, interval_min: int, pred_len: int,
                      n_paths: int, T: float = 1.0, top_p: float = 0.9) -> list[pd.DataFrame]:
+        """Draw n_paths independent futures (each sample_count=1) in one batch."""
         x_df = df[COLS].reset_index(drop=True)
         x_ts = pd.Series(df.index)
         start = df.index[-1] + pd.Timedelta(minutes=interval_min)

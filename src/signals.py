@@ -24,7 +24,8 @@ def atr(df: pd.DataFrame, n: int = 14) -> float:
     return float(tr.rolling(n).mean().iloc[-1])
 
 
-def evaluate(symbol, hist, paths, min_move_atr, min_agreement, min_rr, horizon_bars):
+def evaluate(symbol, hist, paths, min_move_atr, min_agreement, min_rr, horizon_bars,
+             sl_min_atr=0.5, tp_rr=None):
     entry = float(hist["close"].iloc[-1])
     finals = np.array([float(p["close"].iloc[-1]) for p in paths])
     rets = finals / entry - 1.0
@@ -45,19 +46,21 @@ def evaluate(symbol, hist, paths, min_move_atr, min_agreement, min_rr, horizon_b
 
     highs = np.array([float(p["high"].max()) for p in paths])
     lows = np.array([float(p["low"].min()) for p in paths])
-    floor = 0.5 * atr_val
+    floor = sl_min_atr * atr_val
     if long:
-        tp = float(np.median(highs))
         sl = min(float(np.percentile(lows, 20)), entry - floor)
-        reward, risk = tp - entry, entry - sl
+        risk = entry - sl
+        tp = entry + tp_rr * risk if tp_rr else float(np.median(highs))
+        reward = tp - entry
     else:
-        tp = float(np.median(lows))
         sl = max(float(np.percentile(highs, 80)), entry + floor)
-        reward, risk = entry - tp, sl - entry
+        risk = sl - entry
+        tp = entry - tp_rr * risk if tp_rr else float(np.median(lows))
+        reward = entry - tp
     if reward <= 0 or risk <= 0:
         return None, summary + " | no valid TP/SL"
-    rr = reward / risk
-    if rr < min_rr:
+    rr = float(tp_rr) if tp_rr else reward / risk
+    if rr < min_rr - 1e-9:
         return None, summary + f" | R:R {rr:.2f} < {min_rr}"
 
     return Signal(symbol, direction, entry, tp, sl, rr, mean_move, agreement,

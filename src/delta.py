@@ -8,6 +8,8 @@ RES_MIN = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
 
 
 def fetch_candles(symbol: str, resolution: str, start_ts: int, end_ts: int, getter=None) -> pd.DataFrame:
+    """Public Delta Exchange India candles (no API key). Returns UTC-naive DataFrame
+    indexed by candle open time: open/high/low/close/volume."""
     get = getter or requests.get
     step = RES_MIN[resolution] * 60
     chunk = 1500 * step
@@ -33,7 +35,7 @@ def fetch_candles(symbol: str, resolution: str, start_ts: int, end_ts: int, gett
         rows += (data or {}).get("result") or []
         if e >= end_ts:
             break
-        s = e - step
+        s = e - step          # 1 candle overlap, removed by de-duplication
         time.sleep(0.25)
     if not rows:
         raise ValueError(f"no candles returned for {symbol}")
@@ -45,6 +47,7 @@ def fetch_candles(symbol: str, resolution: str, start_ts: int, end_ts: int, gett
 
 
 def regularize(df: pd.DataFrame, minutes: int) -> pd.DataFrame:
+    """Fill missing candles (no trades) so the series has a strict fixed step."""
     full = pd.date_range(df.index[0], df.index[-1], freq=f"{minutes}min")
     df = df.reindex(full)
     df["close"] = df["close"].ffill()
