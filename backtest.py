@@ -12,15 +12,18 @@ from src.delta import RES_MIN, fetch_candles, regularize
 from src.signals import evaluate
 
 OUT = Path("results")
+EDGES = [0.0, 0.625, 0.75, 0.875, 1.01]
+LABELS = ["under 62%", "62-75%", "75-88%", "88-100%"]
 
 
+# ---------------------------------------------------------------- data
 def load_data(cfg, bt, days, log=print):
     interval = cfg["data"]["interval"]
     mins = RES_MIN[interval]
     lookback = cfg["data"]["lookback"]
     horizon = cfg["forecast"]["horizon_bars"]
-    end_ts = int(time.time() // (mins * 60)) * (mins * 60)
-    start_ts = end_ts - days * 86400 - (lookback + horizon + 20) * mins * 60
+    end_ts = int(time.time() // (mins * 60)) * (mins * 60)      # start of the still-forming candle
+    start_ts = end_ts - int(days * 86400) - (lookback + horizon + 20) * mins * 60
     data = {}
     for s in bt["symbols"]:
         for dsym in s["delta"]:
@@ -42,7 +45,9 @@ def load_data(cfg, bt, days, log=print):
     return data
 
 
-def run_forecasts(fc, data, cfg, days, step_hours, max_minutes, log=print):
+# ---------------------------------------------------------------- forecasting
+def run_forecasts(fc, data, cfg, days, step_hours, max_minutes, skip_weekend=(), steps=None,
+                  checkpoint=None, log=print):
     mins = RES_MIN[cfg["data"]["interval"]]
     lookback = cfg["data"]["lookback"]
     f = cfg["forecast"]
@@ -51,16 +56,22 @@ def run_forecasts(fc, data, cfg, days, step_hours, max_minutes, log=print):
     t_last = end_time - pd.Timedelta(minutes=mins * (horizon - 1))
     t_first = t_last - pd.Timedelta(days=days)
     grid = pd.date_range(t_first.ceil(f"{step_hours}h"), t_last, freq=f"{step_hours}h")
-    steps = {name: [] for name in data}
+    steps = steps if steps is not None else {}
+    for name in data:
+        steps.setdefault(name, [])
+    done = {name: {s["i"] for s in steps[name]} for name in data}
+    already = sum(len(v) for v in steps.values())
     t0 = time.time()
-    log(f"{len(grid)} time steps x {len(data)} symbols = {len(grid) * len(data)} forecasts")
+    log(f"{len(grid)} time steps, {len(data)} symbols (already done: {already} forecasts)")
     for n, t in enumerate(grid, 1):
         if (time.time() - t0) / 60 > max_minutes:
             log(f"time limit reached after {n - 1} steps - analysing what is done")
             break
         for name, df in data.items():
+            if name in skip_weekend and t.weekday() >= 5:
+                continue
             i = int(df.index.get_indexer([t])[0])
-            if i < lookback or i + horizon > len(df):
+            if i < lookback or i + horizon > len(df) or i in done[name]:
                 continue
             hist = df.iloc[i - lookback:i]
             paths = fc.sample_paths(hist, mins, horizon, f["n_paths"], f["temperature"], f["top_p"])
@@ -70,11 +81,72 @@ def run_forecasts(fc, data, cfg, days, step_hours, max_minutes, log=print):
                 "highs": [float(p["high"].max()) for p in paths],
                 "lows": [float(p["low"].min()) for p in paths],
             })
+            done[name].add(i)
+        if checkpoint and n % 3 == 0:
+            checkpoint(steps)
         log(f"step {n}/{len(grid)} done ({(time.time() - t0) / 60:.1f} min)")
+    if checkpoint:
+        checkpoint(steps)
     return steps
 
 
+# ---------------------------------------------------------------- does the model predict direction at all?
+def direction_stats(data, steps, cfg, min_agreement):
+    h = cfg["forecast"]["horizon_bars"]
+    recs = []
+    for name, df in data.items():
+        close = df["close"].to_numpy()
+        for st in steps.get(name, []):
+            i = st["i"]
+            if i + h - 1 >= len(close):
+                continue
+            ref, end = close[i - 1], close[i + h - 1]
+            finals = np.array(st["finals"])
+            n = len(finals)
+            up = int((finals > ref).sum())
+            d = 1 if finals.mean() > ref else -1
+            recs.append((max(up, n - up) / n, d, end / ref - 1))
+    if not recs:
+        return [], 50.0, "no forecasts"
+    a = np.array(recs)
+    agree, d, actual = a[:, 0], a[:, 1], a[:, 2]
+    hit = np.sign(actual) == d
+
+    def row(label, mask):
+        n = int(mask.sum())
+        if n == 0:
+            return {"agreement": label, "windows": 0, "hit_%": "-", "ci95_+-": "-", "avg_move_in_dir_%": "-"}
+        p = float(hit[mask].mean())
+        ci = 1.96 * np.sqrt(max(p * (1 - p), 1e-9) / n)
+        return {"agreement": label, "windows": n, "hit_%": round(p * 100, 1), "ci95_+-": round(ci * 100, 1),
+                "avg_move_in_dir_%": round(float((actual[mask] * d[mask]).mean()) * 100, 3)}
+
+    rows = [row(lab, (agree >= lo) & (agree < hi)) for lab, lo, hi in zip(LABELS, EDGES[:-1], EDGES[1:])]
+    rows.append(row("ALL windows", np.ones(len(a), bool)))
+    live = agree >= min_agreement - 1e-9
+    rows.append(row(f"at/above live setting ({min_agreement:.0%})", live))
+    up_rate = float((actual > 0).mean()) * 100
+    naive = max(up_rate, 100 - up_rate)
+
+    n = int(live.sum())
+    if n < 30:
+        verdict = f"Only {n} windows at the live agreement level - too few to judge direction skill."
+    else:
+        p = float(hit[live].mean())
+        ci = 1.96 * np.sqrt(p * (1 - p) / n)
+        bar = max(0.5, naive / 100)
+        if p - ci > bar:
+            verdict = (f"Direction hit rate {p:.1%} +- {ci:.1%} over {n} windows beats the naive "
+                       f"{naive:.0f}% bar: a possible edge (still check costs/stops and out-of-sample).")
+        else:
+            verdict = (f"Direction hit rate {p:.1%} +- {ci:.1%} over {n} windows does NOT clearly beat the naive "
+                       f"{naive:.0f}% bar: no clear direction edge detected on this sample.")
+    return rows, naive, verdict
+
+
+# ---------------------------------------------------------------- trade simulation
 def simulate(direction, entry, tp, sl, fut):
+    """Walk candles; if TP and SL are both inside one candle, count the loss."""
     hi, lo, cl = fut["high"].to_numpy(), fut["low"].to_numpy(), fut["close"].to_numpy()
     for k in range(len(fut)):
         if direction == "LONG":
@@ -95,8 +167,15 @@ def net_r(direction, entry, exit_px, risk, cost_pct):
     return pnl / risk - (cost_pct / 100 * entry) / risk
 
 
-def analyze(data, steps, cfg, bt, min_move_atr, min_agreement):
+def analyze(data, steps, cfg, bt, min_move_atr, min_agreement, sl_min_atr=None,
+            exit_mode="forecast", min_rr=None):
+    """exit_mode: forecast (target from forecast paths) | fixed_rr | time_only (no TP/SL, exit at horizon)."""
     sig = cfg["signal"]
+    if sl_min_atr is None:
+        sl_min_atr = sig.get("sl_min_atr", 0.5)
+    if min_rr is None:
+        min_rr = sig["min_rr"]
+    tp_rr = (sig.get("tp_rr") or bt["exits"]["fixed_rr"]) if exit_mode == "fixed_rr" else None
     horizon = cfg["forecast"]["horizon_bars"]
     mins = RES_MIN[cfg["data"]["interval"]]
     cooldown_bars = int(sig["cooldown_hours"] * 60 / mins)
@@ -109,42 +188,47 @@ def analyze(data, steps, cfg, bt, min_move_atr, min_agreement):
             hist = df.iloc[i - 30:i][["high", "low", "close"]]
             paths = [pd.DataFrame({"close": [a], "high": [b], "low": [c]})
                      for a, b, c in zip(st["finals"], st["highs"], st["lows"])]
-            signal, _ = evaluate(name, hist, paths, min_move_atr, min_agreement, sig["min_rr"], horizon)
+            signal, _ = evaluate(name, hist, paths, min_move_atr, min_agreement, min_rr,
+                                 horizon, sl_min_atr, tp_rr)
             if signal is None:
                 continue
             if last_dir == signal.direction and (i - last_i) < cooldown_bars:
                 continue
             last_i, last_dir = i, signal.direction
             if i <= busy_until:
-                continue
-            entry = float(df["open"].iloc[i])
-            d, tp, sl = signal.direction, signal.tp, signal.sl
-            if not ((sl < entry < tp) if d == "LONG" else (tp < entry < sl)):
-                continue
+                continue                                   # one trade at a time per symbol
+            entry = float(df["open"].iloc[i])              # enter at the NEXT candle open
+            d = signal.direction
+            tp = entry + (signal.tp - signal.entry)        # keep the planned distances,
+            sl = entry + (signal.sl - signal.entry)        # measured from the real entry price
             risk, reward = abs(entry - sl), abs(tp - entry)
             fut = df.iloc[i:i + horizon]
-            exit_px, reason, k = simulate(d, entry, tp, sl, fut)
-            md = "SHORT" if d == "LONG" else "LONG"
-            m_tp = entry - reward if d == "LONG" else entry + reward
-            m_sl = entry + risk if d == "LONG" else entry - risk
-            m_exit, _, _ = simulate(md, entry, m_tp, m_sl, fut)
+            md = "SHORT" if d == "LONG" else "LONG"        # mirror = opposite side, same distances
+            if exit_mode == "time_only":
+                exit_px, reason, k = float(fut["close"].iloc[-1]), "TIME", len(fut) - 1
+                m_exit = exit_px
+            else:
+                exit_px, reason, k = simulate(d, entry, tp, sl, fut)
+                m_tp = entry - reward if d == "LONG" else entry + reward
+                m_sl = entry + risk if d == "LONG" else entry - risk
+                m_exit, _, _ = simulate(md, entry, m_tp, m_sl, fut)
             trades.append({
                 "symbol": name, "time": df.index[i], "direction": d, "entry": entry, "tp": tp, "sl": sl,
                 "exit": exit_px, "reason": reason, "bars": k + 1,
                 "net_R": net_r(d, entry, exit_px, risk, cost_pct),
                 "mirror_net_R": net_r(md, entry, m_exit, risk, cost_pct),
-                "planned_rr": reward / risk,
+                "planned_rr": reward / risk, "risk_pct": risk / entry * 100,
             })
             busy_until = i + k
     cols = ["symbol", "time", "direction", "entry", "tp", "sl", "exit", "reason", "bars",
-            "net_R", "mirror_net_R", "planned_rr"]
+            "net_R", "mirror_net_R", "planned_rr", "risk_pct"]
     return pd.DataFrame(trades, columns=cols).sort_values("time").reset_index(drop=True)
 
 
 def metrics(t: pd.DataFrame) -> dict:
     if t.empty:
         return {"trades": 0, "win_%": 0.0, "avg_R": 0.0, "total_R": 0.0, "profit_factor": 0.0,
-                "max_dd_R": 0.0, "random_dir_avg_R": 0.0, "TP": 0, "SL": 0, "TIME": 0}
+                "max_dd_R": 0.0, "random_dir_avg_R": 0.0, "avg_stop_%": 0.0, "TP": 0, "SL": 0, "TIME": 0}
     r = t["net_R"]
     wins, losses = r[r > 0].sum(), -r[r < 0].sum()
     eq = r.cumsum()
@@ -152,6 +236,7 @@ def metrics(t: pd.DataFrame) -> dict:
             "total_R": round(r.sum(), 2), "profit_factor": round(wins / losses, 2) if losses > 0 else 99.0,
             "max_dd_R": round((eq.cummax() - eq).max(), 2),
             "random_dir_avg_R": round(((t["net_R"] + t["mirror_net_R"]) / 2).mean(), 3),
+            "avg_stop_%": round(t["risk_pct"].mean(), 3),
             "TP": int((t["reason"] == "TP").sum()), "SL": int((t["reason"] == "SL").sum()),
             "TIME": int((t["reason"] == "TIME").sum())}
 
@@ -165,6 +250,7 @@ def md_table(rows: list[dict]) -> str:
     return "\n".join(out) + "\n"
 
 
+# ---------------------------------------------------------------- cache
 def save_cache(path, data, steps, meta):
     obj = {"meta": meta, "symbols": {}}
     for name, df in data.items():
@@ -172,21 +258,37 @@ def save_cache(path, data, steps, meta):
             "t": [x.isoformat() for x in df.index],
             "open": df["open"].tolist(), "high": df["high"].tolist(),
             "low": df["low"].tolist(), "close": df["close"].tolist(),
+            "volume": df["volume"].tolist(), "amount": df["amount"].tolist(),
             "steps": steps.get(name, []),
         }
-    Path(path).write_text(json.dumps(obj))
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_text(json.dumps(obj))
+    tmp.replace(path)                                      # never leaves a half-written file
 
 
 def load_cache(path):
     obj = json.loads(Path(path).read_text())
     data, steps = {}, {}
     for name, s in obj["symbols"].items():
-        data[name] = pd.DataFrame({k: s[k] for k in ("open", "high", "low", "close")},
-                                  index=pd.to_datetime(s["t"]))
+        n = len(s["t"])
+        cols = {k: s[k] for k in ("open", "high", "low", "close")}
+        cols["volume"] = s.get("volume") or [0.0] * n
+        cols["amount"] = s.get("amount") or [0.0] * n
+        data[name] = pd.DataFrame(cols, index=pd.to_datetime(s["t"]))
         steps[name] = s["steps"]
     return data, steps, obj["meta"]
 
 
+def apply_meta(cfg, meta):
+    if meta.get("interval"):
+        cfg["data"]["interval"] = meta["interval"]
+    if meta.get("horizon"):
+        cfg["forecast"]["horizon_bars"] = meta["horizon"]
+    if meta.get("n_paths"):
+        cfg["forecast"]["n_paths"] = meta["n_paths"]
+
+
+# ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
@@ -194,54 +296,93 @@ def main():
     ap.add_argument("--days", type=float, default=7)
     ap.add_argument("--step-hours", type=int, default=2)
     ap.add_argument("--max-minutes", type=float, default=300)
-    ap.add_argument("--analyze", help="re-use a saved results/cache.json instead of forecasting again")
+    ap.add_argument("--analyze", help="re-use a saved results/cache.json (no forecasting)")
+    ap.add_argument("--resume", help="continue forecasting from a saved results/cache.json")
+    ap.add_argument("--interval", help="override candle size, e.g. 1h")
+    ap.add_argument("--horizon", type=int, help="override forecast length in candles")
+    ap.add_argument("--n-paths", type=int, help="override sampled paths per forecast (e.g. 16)")
+    ap.add_argument("--lookback", type=int, help="override candles fed to the model")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
     bt = yaml.safe_load(open(args.bt_config))
+    if args.interval:
+        cfg["data"]["interval"] = args.interval
+    if args.horizon:
+        cfg["forecast"]["horizon_bars"] = args.horizon
+    if args.n_paths:
+        cfg["forecast"]["n_paths"] = args.n_paths
+    if args.lookback:
+        cfg["data"]["lookback"] = args.lookback
     OUT.mkdir(exist_ok=True)
+    skip_wk = {s["name"] for s in bt["symbols"] if s.get("skip_weekend")}
 
     if args.analyze:
         data, steps, meta = load_cache(args.analyze)
+        apply_meta(cfg, meta)
     else:
-        data = load_data(cfg, bt, args.days)
-        from src.forecast import Forecaster
+        steps = None
+        if args.resume:
+            data, steps, meta = load_cache(args.resume)
+            apply_meta(cfg, meta)
+            days, step_hours = meta["days"], meta["step_hours"]
+        else:
+            data = load_data(cfg, bt, args.days)
+            days, step_hours = args.days, args.step_hours
+        meta = {"days": days, "step_hours": step_hours, "interval": cfg["data"]["interval"],
+                "horizon": cfg["forecast"]["horizon_bars"], "n_paths": cfg["forecast"]["n_paths"]}
+        from src.forecast import Forecaster          # heavy import only when forecasting
         m = cfg["model"]
         fc = Forecaster(m["name"], m["tokenizer"], m["max_context"], m.get("device"))
-        steps = run_forecasts(fc, data, cfg, args.days, args.step_hours, args.max_minutes)
-        meta = {"days": args.days, "step_hours": args.step_hours}
-        save_cache(OUT / "cache.json", data, steps, meta)
+        steps = run_forecasts(fc, data, cfg, days, step_hours, args.max_minutes, skip_wk, steps,
+                              checkpoint=lambda s: save_cache(OUT / "cache.json", data, s, meta))
 
     sig = cfg["signal"]
-    base = analyze(data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"])
+    live_exit = "fixed_rr" if sig.get("tp_rr") else "forecast"
+    base = analyze(data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"], exit_mode=live_exit)
     base.to_csv(OUT / "trades.csv", index=False)
-
     per_symbol = [{"symbol": s, **metrics(base[base.symbol == s])} for s in data]
     per_symbol.append({"symbol": "ALL", **metrics(base)})
 
-    grid_rows = []
+    dir_rows, naive, verdict = direction_stats(data, steps, cfg, sig["min_agreement"])
+
+    exit_rows = []
+    for mode in ("forecast", "fixed_rr", "time_only"):
+        for sl_a in bt["grid"]["sl_min_atr"]:
+            t = analyze(data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"], sl_a, mode, min_rr=0.0)
+            exit_rows.append({"exit": mode, "sl_min_atr": sl_a, **metrics(t)})
+    move_rows = []
     for a in bt["grid"]["min_move_atr"]:
-        for g in bt["grid"]["min_agreement"]:
-            t = analyze(data, steps, cfg, bt, a, g)
-            grid_rows.append({"min_move_atr": a, "min_agreement": g, **metrics(t)})
-    pd.DataFrame(grid_rows).to_csv(OUT / "grid.csv", index=False)
+        t = analyze(data, steps, cfg, bt, a, sig["min_agreement"], exit_mode=live_exit)
+        move_rows.append({"min_move_atr": a, **metrics(t)})
+    pd.DataFrame(exit_rows).to_csv(OUT / "grid.csv", index=False)
 
     n_fc = sum(len(v) for v in steps.values())
     cost = 2 * (bt["costs"]["fee_pct_per_side"] + bt["costs"]["slippage_pct_per_side"])
     md = [
         "# Kronos backtest (Delta Exchange India candles)\n",
-        f"- Forecast points: **{n_fc}** (every {meta['step_hours']}h over ~{meta['days']} days), "
-        f"{cfg['forecast']['n_paths']} sampled paths each, horizon {cfg['forecast']['horizon_bars']} candles",
+        f"- {cfg['data']['interval']} candles, horizon {cfg['forecast']['horizon_bars']} candles, "
+        f"{cfg['forecast']['n_paths']} sampled paths; **{n_fc}** forecasts "
+        f"(every {meta['step_hours']}h over ~{meta['days']} days)",
         f"- Entry at the open of the candle after the signal; same-candle TP+SL counts as a loss; "
         f"max 1 trade per symbol; cost {cost:.2f}% per round trip",
-        f"- Live settings used: min_move_atr={sig['min_move_atr']}, min_agreement={sig['min_agreement']}, "
-        f"min_rr={sig['min_rr']}\n",
-        "## Results with live settings\n", md_table(per_symbol),
+        f"- Live settings: min_move_atr={sig['min_move_atr']}, min_agreement={sig['min_agreement']}, "
+        f"min_rr={sig['min_rr']}, sl_min_atr={sig.get('sl_min_atr', 0.5)}, exit={live_exit}\n",
+        "## 1. Can the model predict direction at all?\n",
+        f"**{verdict}**\n",
+        md_table(dir_rows),
+        f"`hit_%` = how often price really moved the way Kronos said over the whole horizon. "
+        f"A coin flip is 50%; always guessing the market's majority direction scored {naive:.0f}% here. "
+        f"`ci95_+-` is the uncertainty. Windows overlap, so the real sample is smaller than shown.\n",
+        "## 2. Trades with live settings\n", md_table(per_symbol),
         "`random_dir_avg_R` = average R if the same trades had a random direction. "
-        "The real `avg_R` must beat it clearly.\n",
-        "## Settings comparison (all symbols)\n", md_table(grid_rows),
-        "> Few trades = noisy result. Don't just pick the best row of this table: that is overfitting "
-        "to a short window. Use it to see whether results are stable across neighbouring settings.\n",
+        "The real `avg_R` must beat it clearly. R = multiples of the planned stop distance, after costs.\n",
+        "## 3. Exit style x minimum stop size (same trades, no reward:risk filter)\n", md_table(exit_rows),
+        "`forecast` = target from forecast paths, `fixed_rr` = fixed multiple of the stop, "
+        "`time_only` = no stop/target, exit when the horizon ends.\n",
+        "## 4. Minimum forecast move (live stop and exit)\n", md_table(move_rows),
+        "> Few trades = noisy. Don't pick the single best row: that is overfitting to a short window. "
+        "Look for results that hold across neighbouring rows.\n",
     ]
     (OUT / "summary.md").write_text("\n".join(md))
     print("\n".join(md))

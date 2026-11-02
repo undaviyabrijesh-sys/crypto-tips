@@ -4,12 +4,17 @@ symbols:
   - name: ETHUSD
     delta: ["ETHUSD"]
   - name: GOLD
-    delta: ["XAUTUSD", "PAXGUSD"]
+    delta: ["XAUTUSD", "PAXGUSD"]   # tokenized gold perpetuals on Delta India
+    skip_weekend: true              # thin weekend market: no forecasts, saves time
 
+# Assumed costs - set these to YOUR real Delta fee tier (+GST) and expected slippage
 costs:
   fee_pct_per_side: 0.05
   slippage_pct_per_side: 0.02
 
+exits:
+  fixed_rr: 1.5                     # target used by the "fixed_rr" exit mode
+
 grid:
   min_move_atr: [0.5, 1.0, 1.5]
-  min_agreement: [0.625, 0.75, 0.875]
+  sl_min_atr: [0.5, 1.0, 2.0, 3.0]

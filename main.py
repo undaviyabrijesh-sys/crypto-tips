@@ -1,6 +1,8 @@
 from __future__ import annotations
 import argparse
 import os
+from datetime import datetime, timezone
+
 import yaml
 
 from src import state as st
@@ -42,7 +44,11 @@ def main() -> None:
     for sym in cfg["symbols"]:
         name = sym["name"]
         try:
-            hist, used = fetch_candles(sym["tickers"], interval, cfg["data"]["lookback"])
+            if sym.get("skip_weekend") and datetime.now(timezone.utc).weekday() >= 5:
+                print(f"{name}: weekend (thin market) - skipped")
+                continue
+            hist, used = fetch_candles(sym["tickers"], interval, cfg["data"]["lookback"],
+                                       sym.get("delta"))
             if is_stale(hist, interval):
                 print(f"{name}: data stale (market closed?) - skipped")
                 continue
@@ -50,7 +56,8 @@ def main() -> None:
                                     f_cfg["temperature"], f_cfg["top_p"])
             signal, summary = evaluate(name, hist, paths, sig_cfg["min_move_atr"],
                                        sig_cfg["min_agreement"], sig_cfg["min_rr"],
-                                       f_cfg["horizon_bars"])
+                                       f_cfg["horizon_bars"], sig_cfg.get("sl_min_atr", 0.5),
+                                       sig_cfg.get("tp_rr"))
             print(f"[{used}] {summary}")
             if not signal:
                 continue
