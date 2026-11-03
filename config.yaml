@@ -10,13 +10,14 @@ data:
 
 forecast:
   horizon_bars: 16
-  n_paths: 8
+  n_paths: 32
   temperature: 1.0
   top_p: 0.9
 
 signal:
   min_move_atr: 1.0        # forecast move must be >= this x recent ATR(14)
   min_agreement: 0.75      # share of sampled paths that must agree on direction
+  min_trend_score: 2      # at least 2 of 3 timeframes must align; 4h opposite trend blocks
   min_rr: 1.5
   sl_min_atr: 2.0          # minimum stop distance in ATRs (was 0.5 = far too tight)
   tp_rr: null              # null = target from forecast paths; 1.5 = fixed 1.5R target
