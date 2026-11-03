@@ -18,6 +18,16 @@ def save(state: dict) -> None:
     PATH.write_text(json.dumps(state, indent=2))
 
 
+def already_processed(state: dict, symbol: str, candle_id: str) -> bool:
+    rec = state.get(symbol) or {}
+    return rec.get("last_candle") == candle_id
+
+
+def mark_processed(state: dict, symbol: str, candle_id: str) -> None:
+    rec = state.setdefault(symbol, {})
+    rec["last_candle"] = candle_id
+
+
 def in_cooldown(state: dict, symbol: str, direction: str, hours: float) -> bool:
     rec = state.get(symbol)
     if not rec or rec.get("direction") != direction:
@@ -26,5 +36,9 @@ def in_cooldown(state: dict, symbol: str, direction: str, hours: float) -> bool:
     return datetime.now(timezone.utc) - sent < timedelta(hours=hours)
 
 
-def record(state: dict, symbol: str, direction: str) -> None:
-    state[symbol] = {"direction": direction, "time": datetime.now(timezone.utc).isoformat()}
+def record(state: dict, symbol: str, direction: str, candle_id: str | None = None) -> None:
+    rec = state.setdefault(symbol, {})
+    rec["direction"] = direction
+    rec["time"] = datetime.now(timezone.utc).isoformat()
+    if candle_id is not None:
+        rec["last_candle"] = candle_id
