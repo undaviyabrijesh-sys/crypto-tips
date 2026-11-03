@@ -5,10 +5,13 @@ on:
     inputs:
       days:
         description: "Days of history to test"
-        default: "7"
+        default: "30"
       step_hours:
         description: "Hours between forecast points"
         default: "2"
+      n_paths:
+        description: "Independent forecast paths per timestamp"
+        default: "32"
 
 jobs:
   backtest:
@@ -37,7 +40,7 @@ jobs:
           key: hf-kronos-base-v1
 
       - name: Run backtest
-        run: python backtest.py --days ${{ inputs.days }} --step-hours ${{ inputs.step_hours }} --max-minutes 300
+        run: python backtest.py --bt-config backtest_btc.yaml --days ${{ inputs.days }} --step-hours ${{ inputs.step_hours }} --n-paths ${{ inputs.n_paths }} --max-minutes 300
 
       - name: Show summary
         if: always()
