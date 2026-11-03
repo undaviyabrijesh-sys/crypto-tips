@@ -52,12 +52,27 @@ def main() -> None:
             if is_stale(hist, interval):
                 print(f"{name}: data stale (market closed?) - skipped")
                 continue
+            # Factor 2: fetch completed 1h candles, then derive completed 4h bars.
+            trend_1h, trend_used = fetch_candles(sym["tickers"], "1h", 600, sym.get("delta"))
+            trend_4h = trend_1h.resample("4h", label="left", closed="left").agg({
+                "open": "first", "high": "max", "low": "min", "close": "last",
+                "volume": "sum", "amount": "sum"
+            }).dropna(subset=["open", "high", "low", "close"])
+            last_1h_end = trend_1h.index[-1] + pd.Timedelta(hours=1)
+            trend_4h = trend_4h[trend_4h.index + pd.Timedelta(hours=4) <= last_1h_end]
+            trend_frames = {"15m": hist, "1h": trend_1h, "4h": trend_4h}
+            if len(trend_4h) < 55:
+                print(f"{name}: insufficient completed 4h candles for trend filter - skipped")
+                continue
+
             paths = fc.sample_paths(hist, mins, f_cfg["horizon_bars"], f_cfg["n_paths"],
                                     f_cfg["temperature"], f_cfg["top_p"])
             signal, summary = evaluate(name, hist, paths, sig_cfg["min_move_atr"],
                                        sig_cfg["min_agreement"], sig_cfg["min_rr"],
                                        f_cfg["horizon_bars"], sig_cfg.get("sl_min_atr", 0.5),
-                                       sig_cfg.get("tp_rr"))
+                                       sig_cfg.get("tp_rr"), trend_frames,
+                                       sig_cfg.get("min_trend_score", 2))
+            print(f"  (trend source: {trend_used})")
             print(f"[{used}] {summary}")
             if not signal:
                 continue
