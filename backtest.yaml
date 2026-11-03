@@ -18,3 +18,4 @@ exits:
 grid:
   min_move_atr: [0.5, 1.0, 1.5]
   sl_min_atr: [0.5, 1.0, 2.0, 3.0]
+  fixed_rr: [1.5, 2.0, 3.0]
