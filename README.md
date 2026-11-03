@@ -10,11 +10,10 @@ when the forecast looks like a trade setup.
 3. A setup is flagged only if all of these hold:
    - average forecast move >= `min_move_pct` for that symbol
    - >= 75% of sampled paths agree on direction
-   - EMA trend agrees on at least 2 of 3 completed timeframes (15m, 1h, 4h); an opposing 4h trend blocks the setup
    - suggested TP (median path extreme) / SL (20th-percentile adverse extreme, min 0.5 ATR) gives R:R >= 1.5
 4. Discord embed with entry / TP / SL / R:R. Same symbol+direction is muted for 4h.
 
-Tune everything in `config.yaml`. The live signal engine intentionally uses only two confirmation factors: (1) Kronos sampled-path agreement and (2) 15m/1h/4h EMA trend alignment. Path agreement is a model-sample statistic, not a calibrated probability of trade success.
+Tune everything in `config.yaml`. The live signal engine relies on Kronos sampled forecast paths and their directional agreement. No EMA or external trend confirmation is applied. Path agreement is a model-sample statistic, not a calibrated probability of trade success.
 
 ## Setup
 ```bash
