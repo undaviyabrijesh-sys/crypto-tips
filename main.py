@@ -34,10 +34,8 @@ def main() -> None:
     interval = cfg["data"]["interval"]
     mins = interval_minutes(interval)
 
-    from src.forecast import Forecaster  # heavy import (torch) only when needed
-    fc = Forecaster(cfg["model"]["name"], cfg["model"]["tokenizer"],
-                    cfg["model"]["max_context"], cfg["model"].get("device"))
-
+    # Load the large model only when at least one symbol has a new completed candle.
+    fc = None
     state = st.load()
     sig_cfg, f_cfg = cfg["signal"], cfg["forecast"]
 
@@ -60,6 +58,10 @@ def main() -> None:
                 print(f"{name}: candle {candle_id} already checked - skipped")
                 continue
 
+            if fc is None:
+                from src.forecast import Forecaster  # heavy torch import only when a new candle exists
+                fc = Forecaster(cfg["model"]["name"], cfg["model"]["tokenizer"],
+                                cfg["model"]["max_context"], cfg["model"].get("device"))
             paths = fc.sample_paths(hist, mins, f_cfg["horizon_bars"], f_cfg["n_paths"],
                                     f_cfg["temperature"], f_cfg["top_p"])
             signal, summary = evaluate(name, hist, paths, sig_cfg["min_move_atr"],
