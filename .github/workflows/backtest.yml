@@ -1,8 +1,6 @@
 name: Kronos backtest
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       days:
@@ -17,7 +15,6 @@ on:
 
 jobs:
   backtest:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-btc-backtest]')
     runs-on: ubuntu-latest
     timeout-minutes: 340
     steps:
