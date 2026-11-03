@@ -37,6 +37,10 @@ python main.py --dry-run          # forecast, print signals only
 python main.py                    # real run (add to cron: */15 * * * *)
 ```
 
+## Research backtest
+
+The manual **Kronos backtest** workflow now defaults to a BTC-only 30-day study with 32 sampled paths at 2-hour forecast intervals. It uses the dedicated `backtest_btc.yaml`; the alert configuration is unchanged. The result artifact includes the forecast cache, trade ledger, equity plot and diagnostic summary. Stop gaps are filled at the candle open in the simulator, and the report includes post-stop target recovery diagnostics.
+
 ## Notes
 - Kronos is a research forecasting model. Its signals here are **unvalidated** - backtest
   and paper-trade before risking money. This is not financial advice.
