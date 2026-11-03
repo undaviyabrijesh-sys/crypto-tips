@@ -9,8 +9,8 @@ symbols:
 
 # Assumed costs - set these to YOUR real Delta fee tier (+GST) and expected slippage
 costs:
-  fee_pct_per_side: 0.05
-  slippage_pct_per_side: 0.02
+  fee_pct_per_side: 0.059             # 0.05% taker fee + 18% GST
+  slippage_pct_per_side: 0.02         # assumed 2 bps per side
 
 exits:
   fixed_rr: 1.5                     # target used by the "fixed_rr" exit mode
