@@ -52,6 +52,14 @@ def main() -> None:
             if is_stale(hist, interval):
                 print(f"{name}: data stale (market closed?) - skipped")
                 continue
+
+            # The workflow may run every 5 minutes, but only forecast once per
+            # newly completed 15-minute candle.
+            candle_id = hist.index[-1].isoformat()
+            if st.already_processed(state, name, candle_id):
+                print(f"{name}: candle {candle_id} already checked - skipped")
+                continue
+
             paths = fc.sample_paths(hist, mins, f_cfg["horizon_bars"], f_cfg["n_paths"],
                                     f_cfg["temperature"], f_cfg["top_p"])
             signal, summary = evaluate(name, hist, paths, sig_cfg["min_move_atr"],
@@ -60,15 +68,18 @@ def main() -> None:
                                        sig_cfg.get("tp_rr"))
             print(f"[{used}] {summary}")
             if not signal:
+                st.mark_processed(state, name, candle_id)
                 continue
             if st.in_cooldown(state, name, signal.direction, sig_cfg["cooldown_hours"]):
                 print(f"{name}: {signal.direction} in cooldown - not re-sent")
+                st.mark_processed(state, name, candle_id)
                 continue
             if args.dry_run:
                 print(signal)
+                st.mark_processed(state, name, candle_id)
             else:
                 send_signal(webhook, signal, interval)
-                st.record(state, name, signal.direction)
+                st.record(state, name, signal.direction, candle_id)
         except Exception as e:
             print(f"{name}: ERROR {e}")
 
