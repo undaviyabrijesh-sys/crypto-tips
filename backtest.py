@@ -188,14 +188,15 @@ def net_r(direction, entry, exit_px, risk, cost_pct):
 
 
 def analyze(data, steps, cfg, bt, min_move_atr, min_agreement, sl_min_atr=None,
-            exit_mode="forecast", min_rr=None):
+            exit_mode="forecast", min_rr=None, fixed_rr=None):
     """exit_mode: forecast (target from forecast paths) | fixed_rr | time_only (no TP/SL, exit at horizon)."""
     sig = cfg["signal"]
     if sl_min_atr is None:
         sl_min_atr = sig.get("sl_min_atr", 0.5)
     if min_rr is None:
         min_rr = sig["min_rr"]
-    tp_rr = (sig.get("tp_rr") or bt["exits"]["fixed_rr"]) if exit_mode == "fixed_rr" else None
+    target_rr = fixed_rr if fixed_rr is not None else (sig.get("tp_rr") or bt["exits"]["fixed_rr"])
+    tp_rr = target_rr if exit_mode == "fixed_rr" else None
     horizon = cfg["forecast"]["horizon_bars"]
     mins = RES_MIN[cfg["data"]["interval"]]
     cooldown_bars = int(sig["cooldown_hours"] * 60 / mins)
@@ -403,10 +404,18 @@ def main():
     dir_rows, naive, verdict = direction_stats(data, steps, cfg, sig["min_agreement"])
 
     exit_rows = []
+    rr_grid = bt["grid"].get("fixed_rr", [bt["exits"]["fixed_rr"]])
     for mode in ("forecast", "fixed_rr", "time_only"):
         for sl_a in bt["grid"]["sl_min_atr"]:
-            t = analyze(data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"], sl_a, mode, min_rr=0.0)
-            exit_rows.append({"exit": mode, "sl_min_atr": sl_a, **metrics(t)})
+            mode_rrs = rr_grid if mode == "fixed_rr" else [None]
+            for rr_target in mode_rrs:
+                t = analyze(
+                    data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"],
+                    sl_a, mode, min_rr=0.0, fixed_rr=rr_target,
+                )
+                exit_rows.append({
+                    "exit": mode, "sl_min_atr": sl_a, "fixed_rr": rr_target, **metrics(t)
+                })
     move_rows = []
     for a in bt["grid"]["min_move_atr"]:
         t = analyze(data, steps, cfg, bt, a, sig["min_agreement"], exit_mode=live_exit)
@@ -435,7 +444,9 @@ def main():
         "The real `avg_R` must beat it clearly. R = multiples of the planned stop distance, after costs.\n",
         "## 3. Exit style x minimum stop size (same trades, no reward:risk filter)\n", md_table(exit_rows),
         "`forecast` = target from forecast paths, `fixed_rr` = fixed multiple of the stop, "
-        "`time_only` = no stop/target, exit when the horizon ends.\n",
+        "`time_only` = no stop/target, exit when the horizon ends. The fixed-RR rows compare every configured target multiple.\n",
+        "`mfe_prior_exit_R` and `mae_prior_exit_R` measure favourable/adverse excursion strictly before the exit candle. "
+        "`stopped_then_target_%` is the share of stop-outs after which the original target was reached later in the same forecast horizon; it is diagnostic, not a tradable result.\n",
         "## 4. Minimum forecast move (live stop and exit)\n", md_table(move_rows),
         "> Few trades = noisy. Don't pick the single best row: that is overfitting to a short window. "
         "Look for results that hold across neighbouring rows.\n",
