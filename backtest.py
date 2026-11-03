@@ -105,7 +105,10 @@ def direction_stats(data, steps, cfg, min_agreement):
             n = len(finals)
             up = int((finals > ref).sum())
             d = 1 if finals.mean() > ref else -1
-            recs.append((max(up, n - up) / n, d, end / ref - 1))
+            # Match live evaluate(): agreement is the share of sampled paths
+            # aligned with the mean-forecast direction, not always the majority.
+            agreement = up / n if d == 1 else (n - up) / n
+            recs.append((agreement, d, end / ref - 1))
     if not recs:
         return [], 50.0, "no forecasts"
     a = np.array(recs)
@@ -146,15 +149,32 @@ def direction_stats(data, steps, cfg, min_agreement):
 
 # ---------------------------------------------------------------- trade simulation
 def simulate(direction, entry, tp, sl, fut):
-    """Walk candles; if TP and SL are both inside one candle, count the loss."""
-    hi, lo, cl = fut["high"].to_numpy(), fut["low"].to_numpy(), fut["close"].to_numpy()
+    """Walk candles with conservative intrabar handling and gap-aware fills.
+
+    If a candle opens through a stop, fill at its open (worse than the stop).
+    If it opens through a resting target, fill at the open (price improvement).
+    If both barriers are touched intrabar, assume stop-first because OHLC data
+    cannot reveal the order of touches.
+    """
+    op = fut["open"].to_numpy()
+    hi = fut["high"].to_numpy()
+    lo = fut["low"].to_numpy()
+    cl = fut["close"].to_numpy()
     for k in range(len(fut)):
         if direction == "LONG":
+            if op[k] <= sl:
+                return float(op[k]), "SL", k
+            if op[k] >= tp:
+                return float(op[k]), "TP", k
             if lo[k] <= sl:
                 return sl, "SL", k
             if hi[k] >= tp:
                 return tp, "TP", k
         else:
+            if op[k] >= sl:
+                return float(op[k]), "SL", k
+            if op[k] <= tp:
+                return float(op[k]), "TP", k
             if hi[k] >= sl:
                 return sl, "SL", k
             if lo[k] <= tp:
@@ -192,11 +212,11 @@ def analyze(data, steps, cfg, bt, min_move_atr, min_agreement, sl_min_atr=None,
                                  horizon, sl_min_atr, tp_rr)
             if signal is None:
                 continue
+            if i <= busy_until:
+                continue                                   # one trade at a time per symbol
             if last_dir == signal.direction and (i - last_i) < cooldown_bars:
                 continue
             last_i, last_dir = i, signal.direction
-            if i <= busy_until:
-                continue                                   # one trade at a time per symbol
             entry = float(df["open"].iloc[i])              # enter at the NEXT candle open
             d = signal.direction
             tp = entry + (signal.tp - signal.entry)        # keep the planned distances,
@@ -212,31 +232,67 @@ def analyze(data, steps, cfg, bt, min_move_atr, min_agreement, sl_min_atr=None,
                 m_tp = entry - reward if d == "LONG" else entry + reward
                 m_sl = entry + risk if d == "LONG" else entry - risk
                 m_exit, _, _ = simulate(md, entry, m_tp, m_sl, fut)
+
+            # Diagnostic only: after a stop, did price later reach the original
+            # target before the forecast horizon ended? This helps distinguish
+            # premature stops from forecasts that simply went the wrong way.
+            after_stop_target = False
+            if reason == "SL" and k + 1 < len(fut):
+                later = fut.iloc[k + 1:]
+                after_stop_target = bool(
+                    (later["high"] >= tp).any() if d == "LONG" else (later["low"] <= tp).any()
+                )
+
+            # Excursion strictly before the exit candle. Excluding the exit
+            # candle avoids pretending OHLC data reveals intrabar ordering.
+            prior = fut.iloc[:k]
+            if prior.empty:
+                mfe_prior_r = mae_prior_r = 0.0
+            elif d == "LONG":
+                mfe_prior_r = max(0.0, (float(prior["high"].max()) - entry) / risk)
+                mae_prior_r = max(0.0, (entry - float(prior["low"].min())) / risk)
+            else:
+                mfe_prior_r = max(0.0, (entry - float(prior["low"].min())) / risk)
+                mae_prior_r = max(0.0, (float(prior["high"].max()) - entry) / risk)
+
             trades.append({
                 "symbol": name, "time": df.index[i], "direction": d, "entry": entry, "tp": tp, "sl": sl,
                 "exit": exit_px, "reason": reason, "bars": k + 1,
                 "net_R": net_r(d, entry, exit_px, risk, cost_pct),
                 "mirror_net_R": net_r(md, entry, m_exit, risk, cost_pct),
                 "planned_rr": reward / risk, "risk_pct": risk / entry * 100,
+                "mfe_prior_exit_R": mfe_prior_r, "mae_prior_exit_R": mae_prior_r,
+                "after_stop_target": after_stop_target,
             })
             busy_until = i + k
     cols = ["symbol", "time", "direction", "entry", "tp", "sl", "exit", "reason", "bars",
-            "net_R", "mirror_net_R", "planned_rr", "risk_pct"]
+            "net_R", "mirror_net_R", "planned_rr", "risk_pct",
+            "mfe_prior_exit_R", "mae_prior_exit_R", "after_stop_target"]
     return pd.DataFrame(trades, columns=cols).sort_values("time").reset_index(drop=True)
 
 
 def metrics(t: pd.DataFrame) -> dict:
     if t.empty:
         return {"trades": 0, "win_%": 0.0, "avg_R": 0.0, "total_R": 0.0, "profit_factor": 0.0,
-                "max_dd_R": 0.0, "random_dir_avg_R": 0.0, "avg_stop_%": 0.0, "TP": 0, "SL": 0, "TIME": 0}
+                "max_dd_R": 0.0, "random_dir_avg_R": 0.0, "avg_stop_%": 0.0,
+                "avg_mfe_prior_exit_R": 0.0, "avg_mae_prior_exit_R": 0.0,
+                "stopped_then_target_%": 0.0, "TP": 0, "SL": 0, "TIME": 0}
     r = t["net_R"]
     wins, losses = r[r > 0].sum(), -r[r < 0].sum()
-    eq = r.cumsum()
+    # Include the initial zero-equity point; otherwise an initial losing trade
+    # is incorrectly treated as the first equity peak and drawdown is understated.
+    eq = np.concatenate(([0.0], r.cumsum().to_numpy()))
+    drawdown = np.maximum.accumulate(eq) - eq
+    stopped = t[t["reason"] == "SL"]
+    stopped_then_target = float(stopped["after_stop_target"].mean() * 100) if len(stopped) else 0.0
     return {"trades": len(t), "win_%": round((r > 0).mean() * 100, 1), "avg_R": round(r.mean(), 3),
             "total_R": round(r.sum(), 2), "profit_factor": round(wins / losses, 2) if losses > 0 else 99.0,
-            "max_dd_R": round((eq.cummax() - eq).max(), 2),
+            "max_dd_R": round(float(drawdown.max()), 2),
             "random_dir_avg_R": round(((t["net_R"] + t["mirror_net_R"]) / 2).mean(), 3),
             "avg_stop_%": round(t["risk_pct"].mean(), 3),
+            "avg_mfe_prior_exit_R": round(t["mfe_prior_exit_R"].mean(), 3),
+            "avg_mae_prior_exit_R": round(t["mae_prior_exit_R"].mean(), 3),
+            "stopped_then_target_%": round(stopped_then_target, 1),
             "TP": int((t["reason"] == "TP").sum()), "SL": int((t["reason"] == "SL").sum()),
             "TIME": int((t["reason"] == "TIME").sum())}
 
