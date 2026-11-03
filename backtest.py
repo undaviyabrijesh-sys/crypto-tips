@@ -206,11 +206,27 @@ def analyze(data, steps, cfg, bt, min_move_atr, min_agreement, sl_min_atr=None,
         busy_until, last_i, last_dir = -1, -10**9, None
         for st in steps.get(name, []):
             i = st["i"]
-            hist = df.iloc[i - 30:i][["high", "low", "close"]]
+            # Use only candles strictly before the forecast timestamp (no look-ahead).
+            prior = df.iloc[:i]
+            hist = prior.iloc[-200:][["high", "low", "close"]]
+            trend_1h = prior.resample("1h", label="left", closed="left").agg({
+                "open": "first", "high": "max", "low": "min", "close": "last",
+                "volume": "sum", "amount": "sum"
+            }).dropna(subset=["open", "high", "low", "close"])
+            trend_4h = prior.resample("4h", label="left", closed="left").agg({
+                "open": "first", "high": "max", "low": "min", "close": "last",
+                "volume": "sum", "amount": "sum"
+            }).dropna(subset=["open", "high", "low", "close"])
+            # Keep only fully closed higher-timeframe candles.
+            last_base_end = prior.index[-1] + pd.Timedelta(minutes=mins)
+            trend_1h = trend_1h[trend_1h.index + pd.Timedelta(hours=1) <= last_base_end]
+            trend_4h = trend_4h[trend_4h.index + pd.Timedelta(hours=4) <= last_base_end]
+            trend_frames = {"15m": hist, "1h": trend_1h, "4h": trend_4h}
             paths = [pd.DataFrame({"close": [a], "high": [b], "low": [c]})
                      for a, b, c in zip(st["finals"], st["highs"], st["lows"])]
             signal, _ = evaluate(name, hist, paths, min_move_atr, min_agreement, min_rr,
-                                 horizon, sl_min_atr, tp_rr)
+                                 horizon, sl_min_atr, tp_rr, trend_frames,
+                                 sig.get("min_trend_score", 2))
             if signal is None:
                 continue
             if i <= busy_until:
