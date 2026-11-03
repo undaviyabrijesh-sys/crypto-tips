@@ -1,0 +1,15 @@
+symbols:
+  - name: BTCUSD
+    delta: ["BTCUSD"]
+
+# Taker entry + taker exit baseline. Fee includes 18% GST.
+costs:
+  fee_pct_per_side: 0.059
+  slippage_pct_per_side: 0.02
+
+exits:
+  fixed_rr: 1.5
+
+grid:
+  min_move_atr: [0.5, 1.0, 1.5]
+  sl_min_atr: [0.5, 1.0, 2.0, 3.0]
