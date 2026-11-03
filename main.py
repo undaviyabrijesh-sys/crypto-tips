@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 
 import yaml
+import pandas as pd
 
 from src import state as st
 from src.data import fetch_candles, interval_minutes, is_stale
