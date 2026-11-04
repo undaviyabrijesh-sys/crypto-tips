@@ -36,7 +36,8 @@ def _close_trade(state: dict, symbol: str, trade: dict, exit_time, exit_px: floa
     pnl_r = (((exit_px - entry) if trade["direction"] == "LONG" else (entry - exit_px)) / risk
              if risk > 0 else 0.0)
     row = {**trade, "exit_time": str(exit_time), "exit": exit_px, "outcome": result,
-           "gross_pnl_pct": round(pnl_pct, 5), "gross_R": round(pnl_r, 4),\n           "estimated_net_pnl_pct": round(net_pnl_pct, 5), "estimated_net_R": round(net_r, 4)}
+           "gross_pnl_pct": round(pnl_pct, 5), "gross_R": round(pnl_r, 4),
+           "estimated_net_pnl_pct": round(net_pnl_pct, 5), "estimated_net_R": round(net_r, 4)}
     log = state.setdefault("_paper_log", [])
     log.append(row)
     del log[:-1000]
@@ -47,7 +48,8 @@ def update_open_signal(state: dict, symbol: str, candles, horizon_bars: int):
     trade = rec.get("open_signal")
     if not trade:
         return None
-    opened_at = datetime.fromisoformat(trade["candle_time"])\n    future = candles[candles.index > opened_at]
+    opened_at = datetime.fromisoformat(trade["candle_time"])
+    future = candles[candles.index > opened_at]
     if future.empty:
         return "OPEN"
     direction = trade["direction"]
@@ -84,5 +86,6 @@ def record(state: dict, symbol: str, direction: str, candle_id: str,
         "symbol": symbol, "direction": direction, "entry": float(entry),
         "tp": float(tp), "sl": float(sl), "candle_time": candle_id,
         "opened_at": datetime.now(timezone.utc).isoformat(),
-        "horizon_bars": int(horizon_bars), "atr": float(atr_value),\n        "round_trip_cost_pct": float(round_trip_cost_pct),
+        "horizon_bars": int(horizon_bars), "atr": float(atr_value),
+        "round_trip_cost_pct": float(round_trip_cost_pct),
     }
