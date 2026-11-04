@@ -94,7 +94,7 @@ def main() -> None:
             else:
                 send_signal(webhook, signal, interval)
                 st.record(state, name, signal.direction, candle_id, signal.entry, signal.tp,
-                          signal.sl, f_cfg["horizon_bars"], atr_value)
+                          signal.sl, f_cfg["horizon_bars"], atr_value,\n                          sig_cfg.get("paper_round_trip_cost_pct", 0.158))
         except Exception as e:
             print(f"{name}: ERROR {e}")
     st.save(state)
