@@ -445,6 +445,13 @@ def main():
 
     n_fc = sum(len(v) for v in steps.values())
     cost = 2 * (bt["costs"]["fee_pct_per_side"] + bt["costs"]["slippage_pct_per_side"])
+    avg_stop_pct = metrics(base)["avg_stop_%"]
+    cost_in_r = cost / avg_stop_pct if avg_stop_pct > 0 else float("inf")
+    cost_note = (f"Round-trip cost is {cost:.3f}% versus average stop {avg_stop_pct:.3f}% "
+                 f"({cost_in_r:.2f}R of stop risk). "
+                 + ("WARNING: costs exceed 0.30R; widen stops or test maker entries before trusting results."
+                    if cost_in_r > 0.30 else "Costs are at or below 0.30R of average stop risk.")
+                 if not base.empty else "No completed trades; cost-to-stop comparison unavailable.")
     md = [
         "# Kronos backtest (Delta Exchange India candles)\n",
         f"- {cfg['data']['interval']} candles, horizon {cfg['forecast']['horizon_bars']} candles, "
@@ -460,7 +467,7 @@ def main():
         f"`hit_%` = how often price really moved the way Kronos said over the whole horizon. "
         f"A coin flip is 50%; always guessing the market's majority direction scored {naive:.0f}% here. "
         f"`ci95_+-` is the uncertainty. Windows overlap, so the real sample is smaller than shown.\n",
-        "## 2. Trades with live settings\n", md_table(per_symbol),
+        "## 2. Trades with live settings\n", md_table(per_symbol), f"**Cost check:** {cost_note}\n",
         "`random_dir_avg_R` = average R if the same trades had a random direction. "
         "The real `avg_R` must beat it clearly. R = multiples of the planned stop distance, after costs.\n",
         "## 3. Exit style x minimum stop size (same trades, no reward:risk filter)\n", md_table(exit_rows),
