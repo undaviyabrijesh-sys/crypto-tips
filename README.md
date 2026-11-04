@@ -24,7 +24,7 @@ gh repo create kronos-alerts --public --source=. --push
 gh secret set DISCORD_WEBHOOK_URL        # paste the webhook URL
 # 3. Run once: Actions tab -> "Kronos alerts" -> Run workflow
 ```
-Use a **public** repo: scheduled runs every 15 min would exceed the free minutes of a private one.
+The scheduled alert workflow checks every 5 minutes, but only forecasts once for each newly completed 15-minute candle. The runtime stores each symbol's last processed candle and any open signal in `state/last_alerts.json` (persisted by the Actions cache).
 GitHub cron can run late or skip runs; for tighter timing run it on a VPS (below).
 
 ## Run locally
@@ -39,7 +39,7 @@ python main.py                    # real run (add to cron: */15 * * * *)
 
 ## Research backtest
 
-The manual **Kronos backtest** workflow now defaults to a BTC-only 30-day study with 32 sampled paths at 2-hour forecast intervals. It uses the dedicated `backtest_btc.yaml`; the alert configuration is unchanged. The result artifact includes the forecast cache, trade ledger, equity plot and diagnostic summary. Stop gaps are filled at the candle open in the simulator, and the report includes post-stop target recovery diagnostics.
+The manual **Kronos backtest** workflow defaults to a BTC-only six-month direction-only study with 32 sampled paths at 2-hour forecast intervals. Section 1 is evaluated before any exit grid; trade/exit tuning should wait until directional skill clearly beats the naive benchmark. It uses the dedicated `backtest_btc.yaml`; the alert configuration is unchanged. The result artifact includes the forecast cache and direction-only summary. The live alert checks planned-entry drift against a 0.25 ATR limit and blocks new alerts while a prior alert remains open through TP, SL or its 16-candle horizon. Resolved alert outcomes are appended to the paper log in `state/last_alerts.json`. Stop gaps are filled at the candle open in the simulator, and the report includes post-stop target recovery diagnostics.
 
 ## Notes
 - Kronos is a research forecasting model. Its signals here are **unvalidated** - backtest
