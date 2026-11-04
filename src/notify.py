@@ -43,12 +43,12 @@ def send_outcome(webhook_url: str, trade: dict) -> None:
     pnl = float(trade.get("gross_pnl_pct", 0.0))
     net = float(trade.get("estimated_net_pnl_pct", pnl))
     message = (
-        f"{icon} **KRONOS — SIGNAL CLOSED: {label}**\\n"
-        f"Signal ID: `{trade.get('signal_id', 'legacy')}`\\n"
-        f"{trade['symbol']} {direction}\\n"
-        f"Entry: {_fmt(float(trade['entry']))} | Exit: {_fmt(float(trade['exit']))}\\n"
-        f"TP: {_fmt(float(trade['tp']))} | SL: {_fmt(float(trade['sl']))}\\n"
-        f"Gross P&L: {pnl:+.3f}% ({float(trade.get('gross_R', 0.0)):+.2f}R)\\n"
+        f"{icon} **KRONOS — SIGNAL CLOSED: {label}**\n"
+        f"Signal ID: `{trade.get('signal_id', 'legacy')}`\n"
+        f"{trade['symbol']} {direction}\n"
+        f"Entry: {_fmt(float(trade['entry']))} | Exit: {_fmt(float(trade['exit']))}\n"
+        f"TP: {_fmt(float(trade['tp']))} | SL: {_fmt(float(trade['sl']))}\n"
+        f"Gross P&L: {pnl:+.3f}% ({float(trade.get('gross_R', 0.0)):+.2f}R)\n"
         f"Estimated net P&L: {net:+.3f}% | Status: **{outcome}**"
     )
     send_text(webhook_url, message)
