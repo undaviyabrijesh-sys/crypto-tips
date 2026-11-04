@@ -36,7 +36,7 @@ def _close_trade(state: dict, symbol: str, trade: dict, exit_time, exit_px: floa
     pnl_r = (((exit_px - entry) if trade["direction"] == "LONG" else (entry - exit_px)) / risk
              if risk > 0 else 0.0)
     row = {**trade, "exit_time": str(exit_time), "exit": exit_px, "outcome": result,
-           "gross_pnl_pct": round(pnl_pct, 5), "gross_R": round(pnl_r, 4)}
+           "gross_pnl_pct": round(pnl_pct, 5), "gross_R": round(pnl_r, 4),\n           "estimated_net_pnl_pct": round(net_pnl_pct, 5), "estimated_net_R": round(net_r, 4)}
     log = state.setdefault("_paper_log", [])
     log.append(row)
     del log[:-1000]
@@ -47,7 +47,7 @@ def update_open_signal(state: dict, symbol: str, candles, horizon_bars: int):
     trade = rec.get("open_signal")
     if not trade:
         return None
-    future = candles[candles.index > trade["candle_time"]]
+    opened_at = datetime.fromisoformat(trade["candle_time"])\n    future = candles[candles.index > opened_at]
     if future.empty:
         return "OPEN"
     direction = trade["direction"]
@@ -75,7 +75,7 @@ def update_open_signal(state: dict, symbol: str, candles, horizon_bars: int):
     return "OPEN"
 
 def record(state: dict, symbol: str, direction: str, candle_id: str,
-           entry: float, tp: float, sl: float, horizon_bars: int, atr_value: float):
+           entry: float, tp: float, sl: float, horizon_bars: int, atr_value: float, round_trip_cost_pct: float = 0.158):
     rec = state.setdefault(symbol, {})
     rec["direction"] = direction
     rec["time"] = datetime.now(timezone.utc).isoformat()
@@ -84,5 +84,5 @@ def record(state: dict, symbol: str, direction: str, candle_id: str,
         "symbol": symbol, "direction": direction, "entry": float(entry),
         "tp": float(tp), "sl": float(sl), "candle_time": candle_id,
         "opened_at": datetime.now(timezone.utc).isoformat(),
-        "horizon_bars": int(horizon_bars), "atr": float(atr_value),
+        "horizon_bars": int(horizon_bars), "atr": float(atr_value),\n        "round_trip_cost_pct": float(round_trip_cost_pct),
     }
