@@ -397,10 +397,6 @@ def main():
 
     sig = cfg["signal"]
     live_exit = "fixed_rr" if sig.get("tp_rr") else "forecast"
-    base = analyze(data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"], exit_mode=live_exit)
-    base.to_csv(OUT / "trades.csv", index=False)
-    per_symbol = [{"symbol": s, **metrics(base[base.symbol == s])} for s in data]
-    per_symbol.append({"symbol": "ALL", **metrics(base)})
 
     dir_rows, naive, verdict = direction_stats(data, steps, cfg, sig["min_agreement"])
     if args.direction_only:
@@ -423,6 +419,10 @@ def main():
         print("\n".join(report))
         return
 
+    base = analyze(data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"], exit_mode=live_exit)
+    base.to_csv(OUT / "trades.csv", index=False)
+    per_symbol = [{"symbol": s, **metrics(base[base.symbol == s])} for s in data]
+    per_symbol.append({"symbol": "ALL", **metrics(base)})
 
     exit_rows = []
     rr_grid = bt["grid"].get("fixed_rr", [bt["exits"]["fixed_rr"]])
