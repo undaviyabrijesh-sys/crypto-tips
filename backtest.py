@@ -359,6 +359,7 @@ def main():
     ap.add_argument("--horizon", type=int, help="override forecast length in candles")
     ap.add_argument("--n-paths", type=int, help="override sampled paths per forecast (e.g. 16)")
     ap.add_argument("--lookback", type=int, help="override candles fed to the model")
+    ap.add_argument("--direction-only", action="store_true", help="write Section 1 only; skip trade and exit analysis")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
@@ -402,6 +403,26 @@ def main():
     per_symbol.append({"symbol": "ALL", **metrics(base)})
 
     dir_rows, naive, verdict = direction_stats(data, steps, cfg, sig["min_agreement"])
+    if args.direction_only:
+        n_fc = sum(len(v) for v in steps.values())
+        report = [
+            "# Kronos direction-only backtest\\n",
+            f"- {cfg['data']['interval']} candles, {cfg['forecast']['horizon_bars']} candle horizon, "
+            f"{cfg['forecast']['n_paths']} paths; {n_fc} forecasts over ~{meta['days']} days "
+            f"at {meta['step_hours']}-hour steps.\\n",
+            "## 1. Can the model predict direction at all?\\n",
+            f"**{verdict}**\\n",
+            md_table(dir_rows),
+            f"`hit_%` is directional accuracy over the full forecast horizon. The naive benchmark is "
+            f"the better of always-long and always-short on this same sample ({naive:.1f}%). "
+            "Confidence intervals are approximate; overlapping windows reduce effective sample size.\\n",
+            "No stop/target grid or exit optimization was run. Only proceed to trade/exit analysis if "
+            "the live-agreement cohort clearly beats the naive benchmark with a useful sample size.\\n",
+        ]
+        (OUT / "summary.md").write_text("\\n".join(report))
+        print("\\n".join(report))
+        return
+
 
     exit_rows = []
     rr_grid = bt["grid"].get("fixed_rr", [bt["exits"]["fixed_rr"]])
