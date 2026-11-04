@@ -406,21 +406,21 @@ def main():
     if args.direction_only:
         n_fc = sum(len(v) for v in steps.values())
         report = [
-            "# Kronos direction-only backtest\\n",
+            "# Kronos direction-only backtest\n",
             f"- {cfg['data']['interval']} candles, {cfg['forecast']['horizon_bars']} candle horizon, "
             f"{cfg['forecast']['n_paths']} paths; {n_fc} forecasts over ~{meta['days']} days "
-            f"at {meta['step_hours']}-hour steps.\\n",
-            "## 1. Can the model predict direction at all?\\n",
-            f"**{verdict}**\\n",
+            f"at {meta['step_hours']}-hour steps.\n",
+            "## 1. Can the model predict direction at all?\n",
+            f"**{verdict}**\n",
             md_table(dir_rows),
             f"`hit_%` is directional accuracy over the full forecast horizon. The naive benchmark is "
             f"the better of always-long and always-short on this same sample ({naive:.1f}%). "
-            "Confidence intervals are approximate; overlapping windows reduce effective sample size.\\n",
+            "Confidence intervals are approximate; overlapping windows reduce effective sample size.\n",
             "No stop/target grid or exit optimization was run. Only proceed to trade/exit analysis if "
-            "the live-agreement cohort clearly beats the naive benchmark with a useful sample size.\\n",
+            "the live-agreement cohort clearly beats the naive benchmark with a useful sample size.\n",
         ]
-        (OUT / "summary.md").write_text("\\n".join(report))
-        print("\\n".join(report))
+        (OUT / "summary.md").write_text("\n".join(report))
+        print("\n".join(report))
         return
 
 
