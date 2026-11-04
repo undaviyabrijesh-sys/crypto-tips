@@ -10,6 +10,7 @@ from src.delta import fetch_current_price
 from src.notify import send_signal, send_text
 from src.signals import atr, evaluate
 
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
@@ -30,10 +31,12 @@ def main() -> None:
     cfg = yaml.safe_load(open(args.config))
     interval = cfg["data"]["interval"]
     mins = interval_minutes(interval)
-    fc = None
     state = st.load()
     sig_cfg, f_cfg = cfg["signal"], cfg["forecast"]
+    pending = []
 
+    # Gather every eligible symbol first. Existing open signals are resolved
+    # before forecasting, and unchanged candle timestamps never enter the batch.
     for sym in cfg["symbols"]:
         name = sym["name"]
         try:
@@ -49,21 +52,41 @@ def main() -> None:
                 print(f"{name}: candle {candle_id} already checked - skipped")
                 continue
 
-            # Resolve an existing trade before considering a new one. A candle
-            # that closes an old trade is not also used to open another trade.
             if (state.get(name) or {}).get("open_signal"):
                 outcome = st.update_open_signal(state, name, hist, f_cfg["horizon_bars"])
                 print(f"{name}: previous signal status {outcome}")
                 st.mark_processed(state, name, candle_id)
-                st.save(state)
                 continue
 
-            if fc is None:
-                from src.forecast import Forecaster
-                fc = Forecaster(cfg["model"]["name"], cfg["model"]["tokenizer"],
-                                cfg["model"]["max_context"], cfg["model"].get("device"))
-            paths = fc.sample_paths(hist, mins, f_cfg["horizon_bars"], f_cfg["n_paths"],
-                                    f_cfg["temperature"], f_cfg["top_p"])
+            pending.append({"symbol": sym, "name": name, "hist": hist,
+                            "source": used, "candle_id": candle_id})
+        except Exception as e:
+            print(f"{name}: ERROR preparing forecast: {e}")
+
+    if not pending:
+        st.save(state)
+        print("No new eligible candles; no Kronos forecast call required.")
+        return
+
+    try:
+        from src.forecast import Forecaster
+        fc = Forecaster(cfg["model"]["name"], cfg["model"]["tokenizer"],
+                        cfg["model"]["max_context"], cfg["model"].get("device"))
+        # One model invocation for the whole symbol set (BTC, ETH, gold),
+        # with 32 independent samples allocated to each symbol.
+        batch_paths = fc.sample_paths_batch(
+            [item["hist"] for item in pending], mins, f_cfg["horizon_bars"],
+            f_cfg["n_paths"], f_cfg["temperature"], f_cfg["top_p"],
+        )
+    except Exception as e:
+        print(f"Kronos batch forecast failed: {e}")
+        st.save(state)
+        return
+
+    for item, paths in zip(pending, batch_paths):
+        sym, name, hist = item["symbol"], item["name"], item["hist"]
+        candle_id, used = item["candle_id"], item["source"]
+        try:
             signal, summary = evaluate(name, hist, paths, sig_cfg["min_move_atr"],
                                        sig_cfg["min_agreement"], sig_cfg["min_rr"],
                                        f_cfg["horizon_bars"], sig_cfg.get("sl_min_atr", 0.5),
@@ -97,8 +120,9 @@ def main() -> None:
                           signal.sl, f_cfg["horizon_bars"], atr_value,
                           sig_cfg.get("paper_round_trip_cost_pct", 0.158))
         except Exception as e:
-            print(f"{name}: ERROR {e}")
+            print(f"{name}: ERROR evaluating alert: {e}")
     st.save(state)
+
 
 if __name__ == "__main__":
     main()
