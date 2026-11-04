@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -47,6 +48,7 @@ def _close_trade(state: dict, symbol: str, trade: dict, exit_time, exit_px: floa
     PATH.parent.mkdir(exist_ok=True)
     (PATH.parent / "paper_log_updated.flag").write_text(datetime.now(timezone.utc).isoformat())
     state[symbol].pop("open_signal", None)
+    return row
 
 def update_open_signal(state: dict, symbol: str, candles, horizon_bars: int):
     rec = state.get(symbol) or {}
@@ -73,12 +75,12 @@ def update_open_signal(state: dict, symbol: str, candles, horizon_bars: int):
             elif hi >= sl: exit_px, result = sl, "SL"
             elif lo <= tp: exit_px, result = tp, "TP"
             else: continue
-        _close_trade(state, symbol, trade, bar_time, exit_px, result)
-        return result
+        row = _close_trade(state, symbol, trade, bar_time, exit_px, result)
+        return row
     if len(future) >= horizon_bars:
         last = future.iloc[horizon_bars - 1]
-        _close_trade(state, symbol, trade, future.index[horizon_bars - 1], float(last["close"]), "TIME")
-        return "TIME"
+        row = _close_trade(state, symbol, trade, future.index[horizon_bars - 1], float(last["close"]), "TIME")
+        return row
     return "OPEN"
 
 def record(state: dict, symbol: str, direction: str, candle_id: str,
@@ -88,6 +90,8 @@ def record(state: dict, symbol: str, direction: str, candle_id: str,
     rec["time"] = datetime.now(timezone.utc).isoformat()
     rec["last_candle"] = candle_id
     rec["open_signal"] = {
+        "signal_id": uuid.uuid4().hex[:12].upper(),
+        "status": "OPEN",
         "symbol": symbol, "direction": direction, "entry": float(entry),
         "tp": float(tp), "sl": float(sl), "candle_time": candle_id,
         "opened_at": datetime.now(timezone.utc).isoformat(),
