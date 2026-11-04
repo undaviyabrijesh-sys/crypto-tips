@@ -46,3 +46,16 @@ The manual **Kronos backtest** workflow defaults to a BTC-only six-month directi
   and paper-trade before risking money. This is not financial advice.
 - Gold has no tick volume on Yahoo (volume = 0); Kronos accepts that. Gold is skipped when the market is closed.
 - Crypto prices come from Yahoo, so they can differ slightly from your exchange (e.g. Delta).
+
+ 
+## Signal lifecycle tracking
+
+Every Discord signal receives a unique Signal ID and is stored as OPEN in
+`state/last_alerts.json`. On each newly completed 15-minute candle, Kronos checks
+the open signal against subsequent candle OHLC data. The first confirmed TP or SL
+closes the signal and sends a separate Discord outcome message with entry, exit,
+TP, SL and gross/estimated-net P&L. If neither level is reached within the configured
+forecast horizon, the signal closes as TIME (horizon expired). If neither event
+has occurred yet, its status remains OPEN. When both TP and SL fall inside the same
+candle range, the tracker conservatively records SL first. This lifecycle layer
+does not alter Kronos forecast or signal selection logic.
