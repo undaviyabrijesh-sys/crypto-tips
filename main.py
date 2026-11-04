@@ -7,7 +7,7 @@ import yaml
 from src import state as st
 from src.data import fetch_candles, interval_minutes, is_stale
 from src.delta import fetch_current_price
-from src.notify import send_signal, send_text
+from src.notify import send_signal, send_text, send_outcome
 from src.signals import atr, evaluate
 
 
@@ -54,7 +54,12 @@ def main() -> None:
 
             if (state.get(name) or {}).get("open_signal"):
                 outcome = st.update_open_signal(state, name, hist, f_cfg["horizon_bars"])
-                print(f"{name}: previous signal status {outcome}")
+                if isinstance(outcome, dict):
+                    print(f"{name}: signal {outcome.get('signal_id')} closed: {outcome['outcome']}")
+                    if not args.dry_run:
+                        send_outcome(webhook, outcome)
+                else:
+                    print(f"{name}: previous signal status {outcome}")
                 st.mark_processed(state, name, candle_id)
                 continue
 
@@ -115,10 +120,11 @@ def main() -> None:
                 print(signal)
                 st.mark_processed(state, name, candle_id)
             else:
-                send_signal(webhook, signal, interval)
                 st.record(state, name, signal.direction, candle_id, signal.entry, signal.tp,
                           signal.sl, f_cfg["horizon_bars"], atr_value,
                           sig_cfg.get("paper_round_trip_cost_pct", 0.158))
+                signal_id = state[name]["open_signal"]["signal_id"]
+                send_signal(webhook, signal, interval, signal_id)
         except Exception as e:
             print(f"{name}: ERROR evaluating alert: {e}")
     st.save(state)
