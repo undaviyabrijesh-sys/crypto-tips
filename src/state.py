@@ -44,6 +44,8 @@ def _close_trade(state: dict, symbol: str, trade: dict, exit_time, exit_px: floa
     log = state.setdefault("_paper_log", [])
     log.append(row)
     del log[:-1000]
+    PATH.parent.mkdir(exist_ok=True)
+    (PATH.parent / "paper_log_updated.flag").write_text(datetime.now(timezone.utc).isoformat())
     state[symbol].pop("open_signal", None)
 
 def update_open_signal(state: dict, symbol: str, candles, horizon_bars: int):
