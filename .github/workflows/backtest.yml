@@ -4,14 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "Days of history to test"
-        default: "30"
+        description: "Days of history to test (180 = about six months)"
+        default: "180"
+        type: string
       step_hours:
         description: "Hours between forecast points"
         default: "2"
+        type: string
       n_paths:
         description: "Independent forecast paths per timestamp"
         default: "32"
+        type: string
+      direction_only:
+        description: "Run Section 1 direction test only; skip exit grid"
+        default: true
+        type: boolean
 
 jobs:
   backtest:
@@ -19,33 +26,27 @@ jobs:
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
       - name: Fetch Kronos code
         run: git clone --depth 1 https://github.com/shiyu-coder/Kronos vendor/Kronos
-
       - name: Install dependencies (CPU torch)
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
-
       - name: Cache Hugging Face models
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
           key: hf-kronos-base-v1
-
-      - name: Run backtest
-        run: python backtest.py --bt-config backtest_btc.yaml --days ${{ inputs.days || '30' }} --step-hours ${{ inputs.step_hours || '2' }} --n-paths ${{ inputs.n_paths || '32' }} --max-minutes 300
-
+      - name: Run six-month BTC direction test
+        run: |
+          python backtest.py --bt-config backtest_btc.yaml --days ${{ inputs.days || '180' }} --step-hours ${{ inputs.step_hours || '2' }} --n-paths ${{ inputs.n_paths || '32' }} --max-minutes 300 ${{ inputs.direction_only && '--direction-only' || '' }}
       - name: Show summary
         if: always()
         run: cat results/summary.md >> "$GITHUB_STEP_SUMMARY" || true
-
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4

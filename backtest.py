@@ -359,6 +359,7 @@ def main():
     ap.add_argument("--horizon", type=int, help="override forecast length in candles")
     ap.add_argument("--n-paths", type=int, help="override sampled paths per forecast (e.g. 16)")
     ap.add_argument("--lookback", type=int, help="override candles fed to the model")
+    ap.add_argument("--direction-only", action="store_true", help="write Section 1 only; skip trade and exit analysis")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
@@ -396,12 +397,35 @@ def main():
 
     sig = cfg["signal"]
     live_exit = "fixed_rr" if sig.get("tp_rr") else "forecast"
+
+    dir_rows, naive, verdict = direction_stats(data, steps, cfg, sig["min_agreement"])
+    if args.direction_only:
+        n_fc = sum(len(v) for v in steps.values())
+        forecast_times = [data[name].index[item["i"]] for name, rows in steps.items() for item in rows]
+        coverage = (f"{min(forecast_times)} to {max(forecast_times)}"
+                    if forecast_times else "no completed forecast timestamps")
+        report = [
+            "# Kronos direction-only backtest\n",
+            f"- {cfg['data']['interval']} candles, {cfg['forecast']['horizon_bars']} candle horizon, "
+            f"{cfg['forecast']['n_paths']} paths; {n_fc} forecasts over ~{meta['days']} days "
+            f"at {meta['step_hours']}-hour steps; actual forecast coverage: {coverage}.\n",
+            "## 1. Can the model predict direction at all?\n",
+            f"**{verdict}**\n",
+            md_table(dir_rows),
+            f"`hit_%` is directional accuracy over the full forecast horizon. The naive benchmark is "
+            f"the better of always-long and always-short on this same sample ({naive:.1f}%). "
+            "Confidence intervals are approximate; overlapping windows reduce effective sample size.\n",
+            "No stop/target grid or exit optimization was run. Only proceed to trade/exit analysis if "
+            "the live-agreement cohort clearly beats the naive benchmark with a useful sample size.\n",
+        ]
+        (OUT / "summary.md").write_text("\n".join(report))
+        print("\n".join(report))
+        return
+
     base = analyze(data, steps, cfg, bt, sig["min_move_atr"], sig["min_agreement"], exit_mode=live_exit)
     base.to_csv(OUT / "trades.csv", index=False)
     per_symbol = [{"symbol": s, **metrics(base[base.symbol == s])} for s in data]
     per_symbol.append({"symbol": "ALL", **metrics(base)})
-
-    dir_rows, naive, verdict = direction_stats(data, steps, cfg, sig["min_agreement"])
 
     exit_rows = []
     rr_grid = bt["grid"].get("fixed_rr", [bt["exits"]["fixed_rr"]])
@@ -424,6 +448,13 @@ def main():
 
     n_fc = sum(len(v) for v in steps.values())
     cost = 2 * (bt["costs"]["fee_pct_per_side"] + bt["costs"]["slippage_pct_per_side"])
+    avg_stop_pct = metrics(base)["avg_stop_%"]
+    cost_in_r = cost / avg_stop_pct if avg_stop_pct > 0 else float("inf")
+    cost_note = (f"Round-trip cost is {cost:.3f}% versus average stop {avg_stop_pct:.3f}% "
+                 f"({cost_in_r:.2f}R of stop risk). "
+                 + ("WARNING: costs exceed 0.30R; widen stops or test maker entries before trusting results."
+                    if cost_in_r > 0.30 else "Costs are at or below 0.30R of average stop risk.")
+                 if not base.empty else "No completed trades; cost-to-stop comparison unavailable.")
     md = [
         "# Kronos backtest (Delta Exchange India candles)\n",
         f"- {cfg['data']['interval']} candles, horizon {cfg['forecast']['horizon_bars']} candles, "
@@ -439,7 +470,7 @@ def main():
         f"`hit_%` = how often price really moved the way Kronos said over the whole horizon. "
         f"A coin flip is 50%; always guessing the market's majority direction scored {naive:.0f}% here. "
         f"`ci95_+-` is the uncertainty. Windows overlap, so the real sample is smaller than shown.\n",
-        "## 2. Trades with live settings\n", md_table(per_symbol),
+        "## 2. Trades with live settings\n", md_table(per_symbol), f"**Cost check:** {cost_note}\n",
         "`random_dir_avg_R` = average R if the same trades had a random direction. "
         "The real `avg_R` must beat it clearly. R = multiples of the planned stop distance, after costs.\n",
         "## 3. Exit style x minimum stop size (same trades, no reward:risk filter)\n", md_table(exit_rows),

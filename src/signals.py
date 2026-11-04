@@ -26,8 +26,11 @@ def atr(df: pd.DataFrame, n: int = 14) -> float:
 
 def evaluate(symbol, hist, paths, min_move_atr, min_agreement, min_rr, horizon_bars,
              sl_min_atr=0.5, tp_rr=None):
+    """Kronos-only signal evaluation: forecast path agreement and forecast-derived risk/reward."""
     entry = float(hist["close"].iloc[-1])
-    finals = np.array([float(p["close"].iloc[-1]) for p in paths])
+    finals = np.array([float(p["close"].iloc[-1]) for p in paths], dtype=float)
+    if len(finals) < 2 or not np.isfinite(finals).all():
+        return None, f"{symbol}: insufficient/invalid forecast paths"
     rets = finals / entry - 1.0
     mean_move = float(rets.mean()) * 100
     p_up = float((rets > 0).mean())
@@ -36,16 +39,18 @@ def evaluate(symbol, hist, paths, min_move_atr, min_agreement, min_rr, horizon_b
     direction = "LONG" if long else "SHORT"
 
     atr_val = atr(hist)
+    if not np.isfinite(atr_val) or atr_val <= 0:
+        return None, f"{symbol}: invalid ATR"
     required = min_move_atr * atr_val / entry * 100
     summary = (f"{symbol}: exp {mean_move:+.2f}% (need {required:.2f}%) | "
-               f"{direction} agreement {agreement:.0%}")
+               f"{direction} Kronos path agreement {agreement:.0%} ({len(paths)} paths)")
     if abs(mean_move) < required:
         return None, summary + " | move too small"
     if agreement < min_agreement:
         return None, summary + f" | agreement < {min_agreement:.0%}"
 
-    highs = np.array([float(p["high"].max()) for p in paths])
-    lows = np.array([float(p["low"].min()) for p in paths])
+    highs = np.array([float(p["high"].max()) for p in paths], dtype=float)
+    lows = np.array([float(p["low"].min()) for p in paths], dtype=float)
     floor = sl_min_atr * atr_val
     if long:
         sl = min(float(np.percentile(lows, 20)), entry - floor)

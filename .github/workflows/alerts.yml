@@ -2,7 +2,7 @@ name: Kronos alerts
 
 on:
   schedule:
-    - cron: "2,17,32,47 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       test_discord:
@@ -40,7 +40,7 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-kronos-base-v1
 
-      - name: Restore alert state (cooldowns)
+      - name: Restore alert state (cooldowns and processed candles)
         uses: actions/cache@v4
         with:
           path: state
@@ -58,3 +58,15 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python main.py
+
+      - name: Upload resolved paper-trade log
+        if: ${{ hashFiles('state/paper_log_updated.flag') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kronos-paper-log-${{ github.run_id }}
+          path: state/last_alerts.json
+          retention-days: 30
+
+      - name: Clear paper-log upload marker
+        if: ${{ success() && hashFiles('state/paper_log_updated.flag') != '' }}
+        run: rm -f state/paper_log_updated.flag
