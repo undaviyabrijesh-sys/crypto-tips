@@ -35,6 +35,9 @@ def _close_trade(state: dict, symbol: str, trade: dict, exit_time, exit_px: floa
     risk = abs(entry - float(trade["sl"]))
     pnl_r = (((exit_px - entry) if trade["direction"] == "LONG" else (entry - exit_px)) / risk
              if risk > 0 else 0.0)
+    cost_pct = float(trade.get("round_trip_cost_pct", 0.0))
+    net_pnl_pct = pnl_pct - cost_pct
+    net_r = pnl_r - (cost_pct / (risk / entry * 100)) if risk > 0 else pnl_r
     row = {**trade, "exit_time": str(exit_time), "exit": exit_px, "outcome": result,
            "gross_pnl_pct": round(pnl_pct, 5), "gross_R": round(pnl_r, 4),
            "estimated_net_pnl_pct": round(net_pnl_pct, 5), "estimated_net_R": round(net_r, 4)}
