@@ -401,11 +401,14 @@ def main():
     dir_rows, naive, verdict = direction_stats(data, steps, cfg, sig["min_agreement"])
     if args.direction_only:
         n_fc = sum(len(v) for v in steps.values())
+        forecast_times = [data[name].index[item["i"]] for name, rows in steps.items() for item in rows]
+        coverage = (f"{min(forecast_times)} to {max(forecast_times)}"
+                    if forecast_times else "no completed forecast timestamps")
         report = [
             "# Kronos direction-only backtest\n",
             f"- {cfg['data']['interval']} candles, {cfg['forecast']['horizon_bars']} candle horizon, "
             f"{cfg['forecast']['n_paths']} paths; {n_fc} forecasts over ~{meta['days']} days "
-            f"at {meta['step_hours']}-hour steps.\n",
+            f"at {meta['step_hours']}-hour steps; actual forecast coverage: {coverage}.\n",
             "## 1. Can the model predict direction at all?\n",
             f"**{verdict}**\n",
             md_table(dir_rows),
