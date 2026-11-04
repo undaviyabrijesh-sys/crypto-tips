@@ -8,7 +8,7 @@ def _fmt(x: float) -> str:
     return f"{x:,.2f}" if x >= 100 else f"{x:,.4f}"
 
 
-def send_signal(webhook_url: str, s: Signal, interval: str) -> None:
+def send_signal(webhook_url: str, s: Signal, interval: str, signal_id: str) -> None:
     long = s.direction == "LONG"
     embed = {
         "title": f"{'🟢' if long else '🔴'} {s.symbol} — {s.direction} setup",
@@ -16,6 +16,7 @@ def send_signal(webhook_url: str, s: Signal, interval: str) -> None:
                         f"**{s.horizon_bars} × {interval}** candles."),
         "color": 0x2ECC71 if long else 0xE74C3C,
         "fields": [
+            {"name": "Signal ID", "value": signal_id, "inline": True},
             {"name": "Entry (last close)", "value": _fmt(s.entry), "inline": True},
             {"name": "Take profit", "value": _fmt(s.tp), "inline": True},
             {"name": "Stop loss", "value": _fmt(s.sl), "inline": True},
